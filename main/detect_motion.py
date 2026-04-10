@@ -34,6 +34,23 @@ def get_sensor_readings() -> dict:
         "humidity": round(sense.get_humidity(), 2),
     }
 
+def get_device_settings(db) -> dict:
+    """
+    Reads the current device settings from Firestore.
+    """
+    settings_ref = db.collection("devices").document(DEVICE_ID).collection("settings").document("config")
+    snapshot = settings_ref.get()
+
+    if not snapshot.exists:
+        return {
+            "mode": "visitor",
+            "status": "offline",
+            "emailAlertsEnabled": False,
+            "securityAlarmEnabled": False,
+        }
+
+    return snapshot.to_dict()
+
 
 def get_mock_motion_detection() -> bool:
     """
@@ -74,10 +91,17 @@ def main():
         sensor_data = get_sensor_readings()
         print(f"Current readings -> Temp: {sensor_data['temperature']}°C, Humidity: {sensor_data['humidity']}%")
 
+        settings = get_device_settings(db)
+        current_mode = settings.get("mode", "visitor")
+
+        print(f"Current mode: {current_mode}")
+
         motion_detected = get_mock_motion_detection()
 
         if motion_detected:
             print("Mock motion detected.")
+            if current_mode == "security":
+                print("buzzer sound")
             send_detection(db, sensor_data, motion_detected=True)
         else:
             print("No motion detected.")
