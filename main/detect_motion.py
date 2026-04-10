@@ -119,17 +119,26 @@ def get_mock_motion_detection() -> bool:
     return random.random() < MOTION_CHANCE
 
 
-def send_detection(db, sensor_data: dict, current_mode: str, motion_detected: bool) -> None:
+def send_detection(
+        db,
+        sensor_data: dict,
+        motion_detected: bool,
+        mode: str,
+        email_sent: bool,
+        alarm_triggered: bool
+):
+    timestamp_iso = datetime.now(timezone.utc).isoformat()
+
     detection = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": timestamp_iso,
         "createdAt": firestore.SERVER_TIMESTAMP,
-        "mode": current_mode,
+        "mode": mode,
         "temperature": sensor_data["temperature"],
         "humidity": sensor_data["humidity"],
         "motionDetected": motion_detected,
         "imageUrl": "",
-        "emailSent": False,
-        "alarmTriggered": False,
+        "emailSent": email_sent,
+        "alarmTriggered": alarm_triggered,
         "source": "raspberry-pi-mock-pir"
     }
 
@@ -147,10 +156,16 @@ def main():
 
     while True:
         sensor_data = get_sensor_readings()
-        print(f"Current readings -> Temp: {sensor_data['temperature']}°C, Humidity: {sensor_data['humidity']}%")
+        print(
+            f"Current readings -> Temp: {sensor_data['temperature']}°C, "
+            f"Humidity: {sensor_data['humidity']}%"
+        )
 
         settings = get_device_settings(db)
         current_mode = settings.get("mode", "visitor")
+        email_alerts_enabled = settings.get("emailAlertsEnabled", False)
+        security_alarm_enabled = settings.get("securityAlarmEnabled", False)
+        device_name = settings.get("deviceName", "DoorWatch Main Entrance")
 
         print(f"Current mode: {current_mode}")
 
@@ -158,9 +173,33 @@ def main():
 
         if motion_detected:
             print("Mock motion detected.")
+
+            timestamp_iso = datetime.now(timezone.utc).isoformat()
+            alarm_triggered = False
+            email_sent = False
+
             if current_mode == "security":
-                print("buzzer sound")
-            send_detection(db, sensor_data, current_mode, motion_detected=True)
+                if security_alarm_enabled:
+                    print("buzzer sound")
+                    alarm_triggered = True
+
+                if email_alerts_enabled:
+                    subject, body = build_security_email(
+                        device_name=device_name,
+                        mode=current_mode,
+                        sensor_data=sensor_data,
+                        timestamp_iso=timestamp_iso
+                    )
+                    email_sent = send_email(subject, body)
+
+            send_detection(
+                db,
+                sensor_data=sensor_data,
+                motion_detected=True,
+                mode=current_mode,
+                email_sent=email_sent,
+                alarm_triggered=alarm_triggered
+            )
         else:
             print("No motion detected.")
 
