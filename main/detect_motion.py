@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import os
 import smtplib
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from sense_hat import SenseHat
 
+load_dotenv(dotenv_path="../.env")
 
 SERVICE_ACCOUNT_PATH = "doorwatch-1d0ff-firebase-adminsdk-fbsvc-92eec4b22c.json"
 DEVICE_ID = "doorwatch-main"
