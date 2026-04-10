@@ -1,6 +1,9 @@
+import os
+import smtplib
 from datetime import datetime, timezone
 import random
 import time
+from email.mime.text import MIMEText
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -9,6 +12,10 @@ from sense_hat import SenseHat
 
 SERVICE_ACCOUNT_PATH = "doorwatch-1d0ff-firebase-adminsdk-fbsvc-92eec4b22c.json"
 DEVICE_ID = "doorwatch-main"
+
+EMAIL_BOT_USERNAME = os.getenv("EMAIL_BOT_USERNAME")
+EMAIL_BOT_PASSWORD = os.getenv("EMAIL_BOT_PASSWORD")
+YOUR_EMAIL = "fionnan98@gmail.com"
 
 # Mock motion settings
 MOCK_MODE = True
@@ -51,6 +58,57 @@ def get_device_settings(db) -> dict:
 
     return snapshot.to_dict()
 
+def send_email(subject: str, body: str) -> bool:
+    """
+    Sends an email using the configured email bot account.
+    Returns True if successful, False otherwise.
+    """
+    if not EMAIL_BOT_USERNAME or not EMAIL_BOT_PASSWORD:
+        print("Email bot credentials are missing.")
+        return False
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_BOT_USERNAME
+    msg["To"] = YOUR_EMAIL
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(EMAIL_BOT_USERNAME, EMAIL_BOT_PASSWORD)
+            server.send_message(msg)
+
+        print("Security alert email sent successfully.")
+        return True
+
+    except Exception as error:
+        print(f"Failed to send email: {error}")
+        return False
+
+
+def build_security_email(device_name: str, mode: str, sensor_data: dict, timestamp_iso: str) -> tuple[str, str]:
+    """
+    Builds the subject and body for a security alert email.
+    """
+    subject = f"DoorWatch Security Alert - Motion Detected at {device_name}"
+
+    body = f"""DoorWatch Security Alert
+
+Motion has been detected while the system is in security mode.
+
+Device: {device_name}
+Mode: {mode}
+Timestamp (UTC): {timestamp_iso}
+
+Environmental readings at time of detection:
+- Temperature: {sensor_data['temperature']} °C
+- Humidity: {sensor_data['humidity']} %
+
+This is an automated alert from your DoorWatch system.
+"""
+
+    return subject, body
+
 
 def get_mock_motion_detection() -> bool:
     """
@@ -61,11 +119,11 @@ def get_mock_motion_detection() -> bool:
     return random.random() < MOTION_CHANCE
 
 
-def send_detection(db, sensor_data: dict, motion_detected: bool):
+def send_detection(db, sensor_data: dict, current_mode: str, motion_detected: bool) -> None:
     detection = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "createdAt": firestore.SERVER_TIMESTAMP,
-        "mode": "visitor",
+        "mode": current_mode,
         "temperature": sensor_data["temperature"],
         "humidity": sensor_data["humidity"],
         "motionDetected": motion_detected,
@@ -102,7 +160,7 @@ def main():
             print("Mock motion detected.")
             if current_mode == "security":
                 print("buzzer sound")
-            send_detection(db, sensor_data, motion_detected=True)
+            send_detection(db, sensor_data, current_mode, motion_detected=True)
         else:
             print("No motion detected.")
 
