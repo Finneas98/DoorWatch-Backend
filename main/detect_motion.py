@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 import firebase_admin
 from firebase_admin import credentials, firestore
 from sense_hat import SenseHat
+from gpiozero import MotionSensor, Buzzer
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -22,11 +23,19 @@ EMAIL_BOT_PASSWORD = os.getenv("EMAIL_BOT_PASSWORD")
 YOUR_EMAIL = "fionnan98@gmail.com"
 
 # Mock motion settings
-MOCK_MODE = True
+MOCK_MODE = False
 MOTION_CHANCE = 0.3   # 30% chance of motion each loop
+
+BUZZER_GPIO_PIN = 17
+PIR_GPIO_PIN = 4         # BCM numbering
 LOOP_DELAY = 5        # seconds between checks
+EMAIL_COOLDOWN_SECONDS = 60
 
 sense = SenseHat()
+buzzer = Buzzer(BUZZER_GPIO_PIN)
+pir = MotionSensor(PIR_GPIO_PIN)
+
+last_email_sent_at = None
 
 
 def init_firestore():
@@ -123,6 +132,17 @@ def get_mock_motion_detection() -> bool:
     return random.random() < MOTION_CHANCE
 
 
+def trigger_buzzer(duration: float = 2.0):
+    """
+    Activates the buzzer for a short duration.
+    """
+    print("Buzzer ON")
+    buzzer.on()
+    time.sleep(duration)
+    buzzer.off()
+    print("Buzzer OFF")
+
+
 def send_detection(
         db,
         sensor_data: dict,
@@ -143,7 +163,7 @@ def send_detection(
         "imageUrl": "",
         "emailSent": email_sent,
         "alarmTriggered": alarm_triggered,
-        "source": "raspberry-pi-mock-pir"
+        "source": "raspberry-pi-mock-pir" if MOCK_MODE else "raspberry-pi-real-pir"
     }
 
     detections_ref = db.collection("devices").document(DEVICE_ID).collection("detections")
@@ -154,9 +174,38 @@ def send_detection(
     print(detection)
 
 
+def get_pir_motion_detection() -> bool:
+    """
+    Reads motion state from the PIR sensor.
+    """
+    return pir.motion_detected
+
+
+def should_send_email() -> bool:
+    """
+    Prevents email spam by enforcing a cooldown.
+    """
+    global last_email_sent_at
+
+    now = time.time()
+
+    if last_email_sent_at is None:
+        last_email_sent_at = now
+        return True
+
+    if now - last_email_sent_at >= EMAIL_COOLDOWN_SECONDS:
+        last_email_sent_at = now
+        return True
+
+    return False
+
+
 def main():
     db = init_firestore()
-    print("DoorWatch running with mock PIR detections...")
+    if MOCK_MODE:
+        print("DoorWatch running with mock PIR detections...")
+    else:
+        print("DoorWatch running with real PIR detections...")
 
     while True:
         sensor_data = get_sensor_readings()
@@ -168,24 +217,30 @@ def main():
         settings = get_device_settings(db)
         current_mode = settings.get("mode", "visitor")
         email_alerts_enabled = settings.get("emailAlertsEnabled", False)
-        security_alarm_enabled = settings.get("securityAlarmEnabled", False)
         device_name = settings.get("deviceName", "DoorWatch Main Entrance")
 
         print(f"Current mode: {current_mode}")
 
-        motion_detected = get_mock_motion_detection()
+        if MOCK_MODE:
+            motion_detected = get_mock_motion_detection()
+        else:
+            motion_detected = get_pir_motion_detection()
+
+        print(f"PIR state: {pir.motion_detected}")
 
         if motion_detected:
-            print("Mock motion detected.")
+            if MOCK_MODE:
+                print("Mock motion detected.")
+            else:
+                print("Motion detected.")
 
             timestamp_iso = datetime.now(timezone.utc).isoformat()
             alarm_triggered = False
             email_sent = False
 
             if current_mode == "security":
-                if security_alarm_enabled:
-                    print("buzzer sound")
-                    alarm_triggered = True
+                trigger_buzzer(2.0)
+                alarm_triggered = True
 
                 if email_alerts_enabled:
                     subject, body = build_security_email(
@@ -204,6 +259,8 @@ def main():
                 email_sent=email_sent,
                 alarm_triggered=alarm_triggered
             )
+
+            time.sleep(5)
         else:
             print("No motion detected.")
 
