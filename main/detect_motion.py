@@ -123,6 +123,69 @@ This is an automated alert from your DoorWatch system.
     return subject, body
 
 
+def update_daily_summary(db, mode: str, sensor_data: dict):
+    """
+    Updates the daily summary document for the current day.
+    """
+    now = datetime.now(timezone.utc)
+
+    # Start of current UTC day
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+
+    # Use YYYY-MM-DD as the document ID for consistency
+    doc_id = day_start.strftime("daily_summary_%Y-%m-%d")
+
+    summary_ref = (
+        db.collection("devices")
+        .document(DEVICE_ID)
+        .collection("analytics")
+        .document(doc_id)
+    )
+
+    snapshot = summary_ref.get()
+
+    if snapshot.exists:
+        existing = snapshot.to_dict()
+
+        old_total = existing.get("totalDetections", 0)
+        new_total = old_total + 1
+
+        old_avg_temp = existing.get("averageTemperature", 0.0)
+        old_avg_humidity = existing.get("averageHumidity", 0.0)
+
+        new_avg_temp = round(
+            ((old_avg_temp * old_total) + sensor_data["temperature"]) / new_total, 2
+        )
+        new_avg_humidity = round(
+            ((old_avg_humidity * old_total) + sensor_data["humidity"]) / new_total, 2
+        )
+
+        updated_data = {
+            "date": day_start,
+            "totalDetections": new_total,
+            "securityDetections": existing.get("securityDetections", 0) + (1 if mode == "security" else 0),
+            "visitorDetections": existing.get("visitorDetections", 0) + (1 if mode == "visitor" else 0),
+            "averageTemperature": new_avg_temp,
+            "averageHumidity": new_avg_humidity,
+        }
+
+        summary_ref.set(updated_data)
+
+    else:
+        summary_data = {
+            "date": day_start,
+            "totalDetections": 1,
+            "securityDetections": 1 if mode == "security" else 0,
+            "visitorDetections": 1 if mode == "visitor" else 0,
+            "averageTemperature": sensor_data["temperature"],
+            "averageHumidity": sensor_data["humidity"],
+        }
+
+        summary_ref.set(summary_data)
+
+    print(f"Daily summary updated for {doc_id}")
+
+
 def get_mock_motion_detection() -> bool:
     """
     Simulates PIR motion detection.
@@ -258,6 +321,12 @@ def main():
                 mode=current_mode,
                 email_sent=email_sent,
                 alarm_triggered=alarm_triggered
+            )
+
+            update_daily_summary(
+                db=db,
+                mode=current_mode,
+                sensor_data=sensor_data
             )
 
             time.sleep(5)
