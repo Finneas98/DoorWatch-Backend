@@ -107,18 +107,18 @@ def build_security_email(device_name: str, mode: str, sensor_data: dict, timesta
 
     body = f"""DoorWatch Security Alert
 
-Motion has been detected while the system is in security mode.
-
-Device: {device_name}
-Mode: {mode}
-Timestamp (UTC): {timestamp_iso}
-
-Environmental readings at time of detection:
-- Temperature: {sensor_data['temperature']} °C
-- Humidity: {sensor_data['humidity']} %
-
-This is an automated alert from your DoorWatch system.
-"""
+    Motion has been detected while the system is in security mode.
+    
+    Device: {device_name}
+    Mode: {mode}
+    Timestamp (UTC): {timestamp_iso}
+    
+    Environmental readings at time of detection:
+    - Temperature: {sensor_data['temperature']} °C
+    - Humidity: {sensor_data['humidity']} %
+    
+    This is an automated alert from your DoorWatch system.
+    """
 
     return subject, body
 
